@@ -1,0 +1,372 @@
+---
+title: "Modelo de Regresión lineal y pronóstico de la demanda"
+author: "Proyecto integradorr"
+date: "4/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Directorio de trabajo
+
+```{r}
+setwd("C:/Users/droma/Universidad EAFIT/Proyecto_integrador_2020-01 - General/4-Notebooks/R/Regresion_lineal")
+```
+
+## Contexto
+
+Se requiere analizar el efecto de variables transaccionales y de tiempo que tiene sobre la demanda para el departamento de comida para la compañia comercializadora Walmart
+
+
+## Desarrollo
+
+Para el desarrollo del modelo se requieren realizar ciertas etapas de análisis antes del pronóstico, como las siguientes:
+
+- Extracción de los datos
+- Exploración de datos
+- Limpieza de los datos 
+- Estructuración de la matriz de covariables (preparación de la base para el modelo)
+- Análisis de correlación entre las covariables
+- Identificación de la variables respuesta
+- Aplicación del modelo de regresión
+- Primeras iteraciones para la selección del mejor modelo
+- Ingeniera de características
+- Selección del modelo óptimo mediante de las métricas de selección
+- Comprobación de las pruebas de normalidad
+- Predicción de la demanda
+- Comparación de la predicción resultante vs los valores reales
+
+
+
+#### Librerías que son necesarias para el desarrollo del modelo
+
+```{r, message = FALSE}
+#librarias para el desarrollo
+library(readr)
+library(dplyr)
+library(plotly)
+library(ggplot2)
+library(corrplot)
+library(lattice)
+library(psych)
+library(car)
+library(stats)
+library(FactoMineR)
+library(readxl)
+library(nortest)
+library(tseries)
+library(rafalib)
+library(MASS)
+library(caret)
+library(leaps)
+# librerias para data manipulation
+library('dplyr') # data manipulation
+library('readr') # input/output
+library('vroom') # input/output
+library('skimr') # overview
+library('tibble') # data wrangling
+library('tidyr') # data wrangling
+library('purrr') # data wrangling
+library('stringr') # string manipulation
+library('forcats') # factor manipulation
+library(xtable) # generación de tablas
+library(kableExtra)
+
+# Date + forecast
+library('lubridate') # date and time
+library('forecast') # time series analysis
+library('prophet') # time series analysis
+library('timetk') # time series analysis
+
+# Interactivity
+library('crosstalk')
+library('plotly')
+
+# parallel
+library('foreach')
+library('doParallel')
+
+library(feather)
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(animation)
+```
+
+
+
+## Exploración y carga de datos
+
+Inicialmente se propone el modelo del pronóstico de la demanda para el mes de febrero del año 2012, por la razón de que la matriz de datos es demasiada extensa, el objetivo es propagar este modelo para los 12 meses de cada año y para todas las tiendas.
+
+Se construyó Script en **Python** donde se realizó una automatización para la  extracción y limpieza de datos para la preparación de la aplicación del modelo 
+
+#### Carga de datos 
+
+La base de datos está en CSV  y está ubicada inicialemente el directorio de trabajo para el desarrollo del proyecto. la fuente de datos es **KAGGLE**, ***https://www.kaggle.com/kailex/m5-forecaster-v2/data***
+
+```{r}
+Sys.setlocale("LC_TIME","Spanish")
+Food<-read_csv("C:/Users/droma/Universidad EAFIT/Proyecto_integrador_2020-01 - General/3-Data/Data_Modelo_Reg/Bd_Febrero.csv")
+```
+
+
+La base de datos contiene 140 registros  y 52 variables que están relacionadas con la demanda para el mes de febrero desde el año 2012 al 2016 para la sección de comidas
+
+```{r}
+
+# Dimensión de la base
+
+dim(Food)
+
+# tipo de dataset
+
+class(Food)
+
+```
+#### Análisis exploratorio
+
+
+## Gráfica de serie de datos
+
+```{r}
+with(Food,
+     plot(y_demand_target,type="l",las=1, main = "Tendencia de la demanda para el  mes de febrero"))
+```
+
+
+
+
+
+#### Comportamiento de febrero
+
+```{r}
+fechas<-apply(cbind(2012,Food$Mes,Food$dia),1,paste,collapse="-")
+fechas<-as.Date(fechas,"%Y-%m-%d")
+plot(fechas,Food$y_demand_target,type="h",las=1, ylab = "Demanda", xlab = "Dias de febrero")
+```
+
+#### Comportamiendo  de las demandas por día de la semana
+
+
+```{r}
+fechas_mes<-months(fechas)
+fechas_dia<-weekdays(fechas)
+
+
+fechas_dia<-factor(fechas_dia,levels=c("lunes","martes","miércoles",
+                                      "jueves","viernes","sábado",
+                                       "domingo"))
+
+boxplot(Food$y_demand_target~fechas_dia, ylab="Demanda", xlab = "Dias de la semana",las=1)
+```
+
+#### Comportamiendo  de las demandas por día del mes
+
+```{r}
+ggplot(data = Food, aes(x = Food$dia , y = Food$y_demand_target)) +
+  geom_line() + 
+ 
+  labs(x = "Dias del mes", y = "Demanda") 
+```
+
+
+## Análisis de correlación entre las covariables
+
+```{r}
+DT<-Food[,c(4:52)]
+M <-as.data.frame(cor(DT))
+
+
+
+M  %>% 
+  head(10) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  kableExtra::scroll_box(width = "100%")
+```
+
+Dada que las relaciones no tienen una relación significativa entre ellas se procede aplicar los análisis para el modelo de regresión para toda la matriz de datos
+
+- $y = demanda$
+- $x_i=$ variablesexplicativas
+
+## Analisis de regresion para toda la matriz 
+
+Se sabe que la variable respuesta es la demanda, por lo tanto se desea conocer las posibles variables que podrían afectar el comportamiento de esta en todos los períodos de cada año
+
+## Modelo 1
+El modelo 1 se compone de la interacción de la variable respuesta con todas las variables de matriz de datos
+
+
+$y_i = \beta + \beta_1 X_1 + ... + \beta_n X_n + e$
+
+
+```{r}
+
+
+mod1<-lm(y_demand_target ~., data = DT)
+
+smmr_1 <- summary(mod1)
+paste("R-squared: ",
+      round(smmr_1$r.squared, 3),
+      ", p-value of F test: ",
+      1-pf(smmr_1$fstatistic[1], smmr_1$fstatistic[2], smmr_1$fstatistic[3]))
+```
+#### Resultados Modelo 1
+- $R^2 = 0.653$
+- $p-F test=2.55015375483225e-09$
+
+#### Gráfica de diagnósticos oara prueba de normalidad en los errores
+
+```{r}
+
+ggplot(data = data.table(Fitted_values = mod1$fitted.values,
+                         Residuals = mod1$residuals),
+       aes(Fitted_values, Residuals)) +
+  geom_point(size = 1.7) +
+  geom_smooth() +
+  geom_hline(yintercept = 0, color = "red", size = 1) +
+  labs(title = "Fitted values vs Residuals")
+
+```
+```{r}
+ggQQ <- function(lm){
+  # extract standardized residuals from the fit
+  d <- data.frame(std.resid = rstandard(lm))
+  # calculate 1Q/4Q line
+  y <- quantile(d$std.resid[!is.na(d$std.resid)], c(0.25, 0.75))
+  x <- qnorm(c(0.25, 0.75))
+  slope <- diff(y)/diff(x)
+  int <- y[1L] - slope * x[1L]
+  
+  p <- ggplot(data = d, aes(sample = std.resid)) +
+    stat_qq(shape = 1, size = 3) +         # open circles
+    labs(title = "Normal Q-Q",             # plot title
+         x = "Theoretical Quantiles",      # x-axis label
+         y = "Standardized Residuals") +   # y-axis label
+    geom_abline(slope = slope, intercept = int, linetype = "dashed",
+                size = 1, col = "firebrick1") # dashed reference line
+  return(p)
+}
+
+ggQQ(mod1)
+
+```
+```{r}
+ggplot(data = data.table(Fitted_values = mod1$fitted.values,
+                         Residuals = mod1$residuals),
+       aes(Fitted_values, Residuals)) +
+  geom_point(size = 1.7) +
+  geom_hline(yintercept = 0, color = "red", size = 1) +
+  labs(title = "Fitted values vs Residuals")
+```
+
+Se comprueba **gráficamente** que efectivamente que cumple las condiciones de normalidad.
+
+
+## Modelo 2
+
+El siguiente proceso es aplicar la metodología de **Backward elimination** mediante la métrica **AIC**
+
+Automáticamente el algoritmo realiza n iteraciones con todas las variables y escoge el mejor modelo según la calificación del AIC
+**Modelo resultante**
+
+
+
+$y_{demanda}$ $= wm_yr_wk + year2012 + year2013 +  year2014 + year2015 + daymonth01 + daymonth02 +$
+$daymonth03 + daymonth04 + daymonth05 + daymonth06 + daymonth07 + daymonth08 + daymonth09$ 
+$+ daymonth10 + daymonth11 + daymonth12 + daymonth13 + daymonth14$ 
+$+ daymonth15 + daymonth16 + daymonth17 + daymonth18 + daymonth19 + $
+$daymonth20 + daymonth21 + daymonth22 + daymonth23 + daymonth24$
+$+ daymonth26 + 01Monday + 02Tuesday +  03Wednesday + 04Thursday$
+$+ 05Friday + eventtypeBoolSporting + sellprice + error$
+
+```{r}
+mod2<-stepAIC(mod1, direction = "both", trace = FALSE)
+summary(mod2)
+```
+
+#### Resultados Modelo 2
+- $R^2 = 0.6473$
+- $p-F test= 4.414e-11$
+- Adjusted R-squared: $ 0.5194$
+- Residual standard error: $4.782$ on $102$ degrees of freedom
+
+
+
+#### Coeficientes de las variables
+
+```{r}
+summary(mod2)$coefficient
+```
+
+### Intervalos de confianza con 95%
+
+```{r}
+confint(mod2)
+```
+
+## Generación de predicción de la demanda
+
+
+
+```{r}
+Predict_demand<-as.data.frame(predict(mod2,DT))
+colnames(Predict_demand)[1]<-"NewDemand"
+Predict_demand
+```
+
+
+
+```{r}
+Date<-as.data.frame(Food$date)
+oldDemand<-as.data.frame(DT$y_demand_target)
+
+
+newdata<-as.data.frame(cbind(fechas,Predict_demand,oldDemand))
+colnames(newdata)[1]<-"Date"
+colnames(newdata)[2]<-"NewDemand"
+colnames(newdata)[3]<-"oldDemand"
+
+with(newdata,
+     plot(NewDemand,type="l",las=1, main = "Predicción demanda"))
+
+
+
+
+```
+
+
+```{r}
+newdata$year<-substring(newdata$Date,1,4)
+newdata$dia<-substring(newdata$Date,9,10)
+febrero<-newdata[c(1:28),c(1:5)]
+```
+
+
+
+# Gráfico resultante
+
+
+```{r}
+
+
+
+
+
+# # Create a first line
+plot(febrero$Date, febrero$NewDemand , type = "l", frame = FALSE, pch = 19,
+     col = "red", xlab = "x", ylab = "y", main = "Real vs predict")
+# Add a second line
+lines(febrero$Date, febrero$oldDemand, pch = 18, col = "blue", type = "b", lty = 2)
+# Add a legend to the plot
+legend("topleft", legend=c("New_Demand", "Old_Demand"),
+       col=c("red", "blue"), lty = 1:2, cex=0.8)
+
+```
+
+
+
