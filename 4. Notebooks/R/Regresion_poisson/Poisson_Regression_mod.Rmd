@@ -1,0 +1,540 @@
+---
+title: "ZERO-INFLATED POISSON REGRESSION"
+author: "Equipo: Carlos Andrés Cuartas Murillo - cacuartasm@eafit.edu.co /  Carlos Alberto Cerro Espinal - cacuartasm@eafit.edu.co / Daniel Román Ramírez - dromanr@eafit.edu.co / Daniel Enrique Pinto Restrepo - dpintor1@eafit.edu.co / Santiago Mejía Chitiva - smejiac3@eafit.edu.co "
+date: "5/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+Sys.setlocale("LC_TIME","Spanish")
+setwd("C:/Users/droma/Universidad EAFIT/Proyecto_integrador_2020-01 - General/4. Notebooks/R/Model_poisson_zero_inflated") ## Directorio de trabajo
+```
+
+## Aplicación de regresión de Poisson inflada a cero
+
+### Contexto 
+
+La regresión de Poisson inflada a cero se utiliza para modelar datos de **conteo** que tienen un **exceso de conteos cero**. Además, la teoría sugiere que los ceros en exceso se generan mediante un **proceso separado de los valores de conteo y que los ceros en exceso se pueden modelar de forma independiente**. Por lo tanto, el modelo zip tiene dos partes, **un modelo de conteo de Poisson y el modelo logit para predecir el exceso de ceros**.
+
+**https://stats.idre.ucla.edu/r/dae/zip/**
+
+### Modelo Poisson para predicción de la demanda para empresa del sector retail
+
+Se requiere analizar el efecto de variables transaccionales y de tiempo que tiene sobre la demanda para la compañia Walmart, el efecto de este estudio es poder tener la demanda necesaria para las temporadas durante el año de ventas.
+En este caso tenemos **un conteo en la variable respuesta demanda** se evidencia una gran existencia de zeros que indica los días que no se tuvo demanda. 
+
+
+
+## Modelo Poisson
+
+La distribución de Poisson es una distribución de probabilidad discreta que expresa, a partir de una **frecuencia de ocurrencia** media, la probabilidad de que **ocurra un determinado número de eventos durante cierto período de tiempo**. Concretamente, se especializa en la probabilidad de ocurrencia de sucesos con probabilidades muy pequeñas, o sucesos «raros». "tomado de  Siméon-Denis Poisson, trabajo Recherches sur la probabilité des jugements en matières criminelles et matière civile (Investigación sobre la probabilidad de los juicios en materias criminales y civiles)."
+
+
+## Propiedades
+
+A continuación se identifica la **función de densidad de probabilidad de Poisson**
+
+
+$f(k,\lambda)= \frac{e^{-\lambda}\lambda ^{k}}{k!}$
+
+- k es el número de ocurrencias del evento o fenómeno (la función nos da la probabilidad de que el evento suceda precisamente k veces).
+- $\lambda$  es un parámetro positivo que representa el número de veces que se espera que ocurra el fenómeno durante un intervalo dado. Por ejemplo, si el suceso estudiado tiene lugar en promedio 4 veces por minuto y estamos interesados en la probabilidad de que ocurra k veces dentro de un intervalo de 10 minutos, usaremos un modelo de distribución de Poisson con $\lambda =  10×4 = 40.$
+- $e$ es la base de los logaritmos naturales ($e = 2,71828…$)
+
+
+# La función generadora de momentos con valor esperado $\lambda$ es:
+
+![](func_momentos.PNG)
+
+Las variables aleatorias de Poisson tienen la propiedad de ser infinitamente divisibles.
+
+La divergencia Kullback-Leibler desde una variable aleatoria de Poisson de parámetro $\lambda_0$ a otra de parámetro $\lambda$ es
+
+![](divergencia.PNG)
+
+# Definición intervalos de confianza
+
+Dada una serie de eventos k (al menos el 15-20) en un periodo de tiempo T, los límites del intervalo de confianza para la frecuencia vienen dadas por:
+
+![](IC.PNG)
+
+entonces los límites del parámetro $\lambda$  están dadas por:${\lambda _{low}=F_{low}T;\lambda _{upp}=F_{upp}T}$${\lambda _{low}=F_{low}T;\lambda _{upp}=F_{upp}T}$
+
+**La distribución de Poisson** se aplica a varios fenómenos discretos de la naturaleza (esto es, aquellos fenómenos que ocurren 0, 1, 2, 3, …, veces durante un periodo definido de tiempo o en un área determinada) cuando la probabilidad de ocurrencia del fenómeno es constante en el tiempo o el espaci
+
+
+## Desarrollo
+
+### Librerías
+
+```{r, message=FALSE}
+#librarias para el desarrollo
+library(readr)
+library(dplyr)
+library(plotly)
+library(ggplot2)
+library(corrplot)
+library(lattice)
+library(psych)
+library(car)
+library(stats)
+library(FactoMineR)
+library(readxl)
+library(nortest)
+library(tseries)
+library(rafalib)
+library(MASS)
+library(caret)
+library(leaps)
+library(pscl)
+# librerias para data manipulation
+library('dplyr') # data manipulation
+library('readr') # input/output
+library('vroom') # input/output
+library('skimr') # overview
+library('tibble') # data wrangling
+library('tidyr') # data wrangling
+library('purrr') # data wrangling
+library('stringr') # string manipulation
+library('forcats') # factor manipulation
+library(xtable) # generación de tablas
+library(kableExtra)
+
+# Date + forecast
+library('lubridate') # date and time
+library('forecast') # time series analysis
+library('prophet') # time series analysis
+library('timetk') # time series analysis
+
+# Interactivity
+library('crosstalk')
+library('plotly')
+
+# parallel
+library('foreach')
+library('doParallel')
+
+library(feather)
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(animation)
+
+#poisson 
+require(ggplot2)
+require(pscl)
+require(boot)
+library(sandwich)
+library(msm)
+library(arm)
+library(jtools)
+#library(broom)
+library(ggstance)
+library(Metrics)
+```
+
+### Carga de datos
+
+Se implementará el modelo para una referencia y posteriormente se escalara para todas las referencias.
+
+
+```{r, message=FALSE}
+dt1<-read.csv("food_1_001.csv", sep = ",")
+```
+
+### Nombres de las columnas de la base
+
+los nombres de la base se guarda en un vector
+
+```{r}
+
+M <-names(dt1)
+M  
+
+```
+
+### Resumen del dataset
+
+```{r}
+dim(dt1) # dimensión de la base
+class(dt1) # clase del data set
+
+s<-summary(dt1) # resumen de la base
+
+s  %>% 
+  head(10) %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  kableExtra::scroll_box(width = "100%")
+
+```
+
+
+
+## Comportamiento de la variable respuesta
+
+En esta gráfica se observa el comportamiento de conteo de la variable respuesta, en este caso tenemos como variable respuesta
+
+$y = Demanda$
+
+```{r, fig.height = 5, fig.width = 4, fig.align = "center"}
+par( mfrow = c(2,2) )
+
+ggplot(dt1, aes(units)) + geom_histogram() + scale_x_log10() +ggtitle("Frecuencia de la demanda")+  labs(y="", x = "Unidades")
+
+
+```
+
+
+```{r, fig.height = 5, fig.width = 4, fig.align = "center"}
+par( mfrow = c(1,1))
+
+z<-dt1$units
+
+hist(z, freq = F ,main = "Frecuencia de la demanda", xlab = "Unidades")
+lines(density(z), col="red")
+```
+
+
+
+
+```{r, fig.align = "center"}
+with(dt1,
+     plot(units, type="l",las=1, main = "Tendencia de la demanda"))
+```
+
+
+## Variable respuesta
+
+```{r}
+mean(dt1$units)
+
+
+var(dt1$units)
+```
+
+
+
+## Selección de variables
+
+Antes de ejecutar el modelo se necesitan quitar las variables que por conocimiento explicito no entran en el modelo
+
+Serían:
+
+- wm_yr_wk
+
+- item_id
+
+- d
+
+- ln_units
+
+- date
+
+Son identificadores unicos y dañarían la interpretabilidad del modelo y no las recibe como atributos
+
+
+```{r}
+
+dt2<-dt1[,c(4,15:17,20:71)] # base lista para el modelo inicial
+
+dt2$units<-as.numeric(dt2$units)
+
+
+```
+
+## Aplicación del modelo
+
+```{r}
+#summary(mod1<-zeroinfl(units~. |1,  dist = "poisson", link = "logit", data = dt2))
+```
+
+
+```{r}
+#mnull <- update(mod1, . ~ 1)
+
+#pchisq(2 * (logLik(mod1) - logLik(mnull)), df = 3, lower.tail = FALSE)
+```
+
+```{r}
+summary(mod1 <- glm(units ~ ., family = poisson, data = dt2))
+```
+
+# Intervalos de confianza para el modelo 1
+
+```{r}
+cov.m1 <- vcovHC(mod1, type="HC0")
+std.err <- sqrt(diag(cov.m1))
+r.est1 <- cbind(Estimate= coef(mod1), "Robust SE" = std.err,
+"Pr(>|z|)" = 2 * pnorm(abs(coef(mod1)/std.err), lower.tail=FALSE),
+LL = coef(mod1) - 1.96 * std.err,
+UL = coef(mod1) + 1.96 * std.err)
+
+r.est1
+```
+
+
+
+
+## Modelo 2
+
+
+
+```{r}
+mod2<-stepAIC(mod1, direction = "both", trace = FALSE)
+summary(mod2)
+```
+
+## Intervalos de confianza para el modelo 2
+
+```{r}
+cov.m2 <- vcovHC(mod2, type="HC0")
+std.err <- sqrt(diag(cov.m2))
+r.est2 <- cbind(Estimate= coef(mod2), "Robust SE" = std.err,
+"Pr(>|z|)" = 2 * pnorm(abs(coef(mod2)/std.err), lower.tail=FALSE),
+LL = coef(mod2) - 1.96 * std.err,
+UL = coef(mod2) + 1.96 * std.err)
+
+r.est2
+```
+
+
+
+
+## Comparación de modelos
+
+```{r}
+anova(mod2, mod1, test="Chisq")
+```
+
+## Modelo 3
+
+```{r}
+mod3<-stepAIC(mod2, direction = "both", trace = FALSE)
+summary(mod3)
+```
+
+## Intervalos de confianza para el modelo 3
+
+```{r}
+cov.m3 <- vcovHC(mod3, type="HC0")
+std.err <- sqrt(diag(cov.m3))
+r.est3 <- cbind(Estimate= coef(mod3), "Robust SE" = std.err,
+"Pr(>|z|)" = 2 * pnorm(abs(coef(mod3)/std.err), lower.tail=FALSE),
+LL = coef(mod3) - 1.96 * std.err,
+UL = coef(mod3) + 1.96 * std.err)
+
+r.est3
+```
+
+
+
+## Comparación de los 3 modelos
+
+```{r}
+anova(mod3, mod2, mod1, test="Chisq")
+```
+
+## Comparación entre los coeficientes entre los modelos 
+
+```{r}
+
+#extrae los coeficientes de cada modelo
+
+coef1<-coef(mod1) 
+
+coef2<-coef(mod2)
+
+coef3<-coef(mod3)
+
+
+# extraer el error estandar de cada modelo
+
+se.coef1<-se.coef(mod1)
+se.coef2<-se.coef(mod2)
+se.coef3<-se.coef(mod3)
+
+# uniendo los resultados
+
+modelos<-cbind(coef1,coef2, coef3, se.coef1, se.coef2, se.coef3)
+
+# resultados
+
+
+
+modelos  %>% 
+  kable() %>% 
+  kable_styling() %>% 
+  kableExtra::scroll_box(width = "100%")
+```
+
+## Modelo 4
+
+```{r}
+mod4<-stepAIC(mod3, direction = "both", trace = FALSE)
+summary(mod4)
+```
+
+
+
+## Gráficas de los modelos 
+
+#### Modelo 1
+
+```{r,fig.align = "center"}
+
+
+par( mfrow = c(2,2) )
+
+plot(mod1) # modelo 1
+
+
+
+```
+
+
+#### Modelo 2
+
+```{r,fig.align = "center"}
+
+
+par( mfrow = c(2,2) )
+
+plot(mod2) # modelo 1
+
+
+
+```
+
+
+#### Modelo 3
+
+```{r,fig.align = "center"}
+
+
+par( mfrow = c(2,2) )
+
+plot(mod3) # modelo 1
+
+
+
+```
+
+
+#### Modelo 4
+
+```{r,fig.align = "center"}
+
+
+par( mfrow = c(2,2) )
+
+plot(mod4) # modelo 1
+
+
+
+```
+
+
+
+# Evaluando los modelos
+
+## Modelo 1
+
+```{r}
+Predict_demand<-as.data.frame(predict(mod1,dt2))
+colnames(Predict_demand)[1]<-"NewDemand"
+#Predict_demand
+
+Date<-as.data.frame(dt1$date)
+oldDemand<-as.data.frame(dt1$units)
+
+
+newdata<-as.data.frame(cbind(Date,Predict_demand,oldDemand))
+colnames(newdata)[1]<-"Date"
+colnames(newdata)[2]<-"NewDemand"
+colnames(newdata)[3]<-"oldDemand"
+
+
+
+```
+
+## Modelo 2 
+
+```{r}
+Predict_demand2<-as.data.frame(predict(mod2,dt2))
+colnames(Predict_demand2)[1]<-"NewDemand"
+#Predict_demand
+
+Date2<-as.data.frame(dt1$date)
+oldDemand<-as.data.frame(dt1$units)
+
+
+newdata2<-as.data.frame(cbind(Date2,Predict_demand2,oldDemand))
+colnames(newdata2)[1]<-"Date"
+colnames(newdata2)[2]<-"NewDemand"
+colnames(newdata2)[3]<-"oldDemand"
+```
+
+
+## Modelo 3 
+
+```{r}
+Predict_demand3<-as.data.frame(predict(mod3,dt2))
+colnames(Predict_demand3)[1]<-"NewDemand"
+#Predict_demand
+
+Date3<-as.data.frame(dt1$date)
+oldDemand<-as.data.frame(dt1$units)
+
+
+newdata3<-as.data.frame(cbind(Date3,Predict_demand3,oldDemand))
+colnames(newdata3)[1]<-"Date"
+colnames(newdata3)[2]<-"NewDemand"
+colnames(newdata3)[3]<-"oldDemand"
+```
+
+
+
+## Modelo 4 
+
+```{r}
+Predict_demand4<-as.data.frame(predict(mod4,dt2))
+colnames(Predict_demand4)[1]<-"NewDemand"
+#Predict_demand
+
+Date4<-as.data.frame(dt1$date)
+oldDemand<-as.data.frame(dt1$units)
+
+
+newdata4<-as.data.frame(cbind(Date4,Predict_demand4,oldDemand))
+colnames(newdata4)[1]<-"Date"
+colnames(newdata4)[2]<-"NewDemand"
+colnames(newdata4)[3]<-"oldDemand"
+```
+
+
+
+
+
+# Métrica MASE 
+
+Modelo 1
+
+```{r}
+mase(newdata$oldDemand,newdata$NewDemand,1)
+
+mase(newdata2$oldDemand,newdata$NewDemand,1)
+
+
+mase(newdata3$oldDemand,newdata$NewDemand,1)
+
+
+mase(newdata4$oldDemand,newdata$NewDemand,1)
+```
+
+
