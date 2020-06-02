@@ -1,0 +1,418 @@
+---
+title: "Arimax M5 Competition"
+author: "Carlos Alberto Cerro Espinal, Carlos Andres Cuartas Murillo, Daniel Enrique Pinto Restrepo, Daniel Roman Ramirez, Santiago Mejia Chitiva"
+date: "May 4 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(lme4)
+library(nlme)
+library(lubridate)
+library(fastDummies)
+library(knitr)
+library(hts)
+library(xts)
+library(forecast)
+library(pscl)
+library(dplyr)
+library(Metrics)
+```
+
+
+# Introduction
+
+The interest of many students to learn analytics and data sciences is having an impact all over the world, many online courses and web sites have been created to supply this uprising demand from students, also different companies have used this increasing world to take advatange of their data. This is the case for the kaggle web site, kaggle is an online platform where you can learn and apply analytics skills, it also has competitions for different topics and companies. For this case we are interested in the M5 competition from Kaggle, the main objective of the competition is to predict (forecast) the demanded units of 3049 sku's to a horizon of 28 days of validation, and 28 days of evaluation of the predicted series. But this is not all, the 3045 references are sold in 10 different stores, located in California(4), Texas (3), and Wisconsin(3), this gives us that there is a total of 30.450 series to be forecasted by the authors. The main objectives of this work is first, to apply some of the regression techniques learned in the current semester, there is a restriction of time so all cant be applied, and second is to test the authors skills developing a real Kaggle competition and evaluate the performance and experience in the competition. The document continues as follows, first we make a little description of the competition, the next step is to describe our dataset, we then continue to describe the code and the different techniques used to solve our problem, finally we finish analyzing our results and making some conclusions of the project.
+
+# The M5 Competition and the data
+
+## The M5 Competition
+
+The M5 competition is sponsored by The M Open Forecasting Center (MOFC) associated with the University of Nicosia (UNIC) which is the largest university in Cyprus. The mission of the MOFC "is to conduct multidisciplinary research in the area of forecasting with emphasis on accuracy and uncertainty and to expand the utilization of forecasting to business firms by identifying their needs, suggesting the most appropriate way of fulfilling them, demonstrating its benefits in reducing costs and/or improving profits while also avoiding untested practices." This is why the MOFC has launched different competitions to adress different problems of forecasting, the M5 is the fifth competition held by the MOFC with a focus on intermittency, which is sporadic demand including zeros. The dataset for the competitions was provided by Walmart with hierachichal sales data, starting at item level aggregating to departments, categories and then stroes in three geographical areas of the United States(US): California, Texas, and Wisconsin.
+
+## The data
+
+As mentioned earlier we have three geographical areas of the United States: California, Texas, and Wisconsin. Each of this areas have stores, California is the leading one with four, Wisconsin and Texas have three stores each one, this give us a total of 10 stores. In each of this stores are sold three categories, Household, Foods and Hobbies, then this categories are divides in a total of 7 departments. Finally we have a total of 3049 items all over the mentioned departments and categories. The main goal is to forecast this 3049 items in each of the mentioned stores, this give us a total of 30490 time series to forecast. To do so, we have information of the weekly selling prices of each of the items for their different locations, we also have information of the special dates/events in the US (i.e mothers day, independence day, NBA finals, etc), finally we have a information of the Supplemental Nutrition Assitance Program (SNAP), which "provides nutrition benefits to supplement the food budget of needy families so they can purchase healthy food and move towards self-sufficiency." This last information may be very significant for the Foods category. To finish this section, and give a more clear information of the available data, here is a summary chart of the mentioned above.
+
+![](summary.jpg)
+
+# Code And Methodology
+
+## Methodology: Hierarchical Arimax
+
+The problem we have here is an obvious problem of hierarchical time series, in the theory of hierarchical time series there are several approaches to forecast all the series. First is the bottom up approach, the objective is to forecast the lowest level of the hierarchy and then sum up to achieve the forecast of the highest leve; the second approach is the top-down approach, that is, you forecast a high level of the process and to get the forecast of the lowest levels you multiply this forecast by the historical proportions of the lowest level. In this technical document, we took a top down approach.
+
+Now we have clear the type of problem we have, but what approach we will take? Here we used an Arimax approach to forecast the series, but, why Arimax? Because, when one works with time series you have to take into account the autoregressive and moving average components, but also, that the series must be stationary to perform well with the econometrics assumptions.
+
+So the development of the code is as follows, firts we upload the data frames and show the size of them, this explains why we took the top down approach. Then we generate a model for one department, and then we scalate the model to iterate for the different stores and departments.
+
+## Code
+In this section we are going to show all the work of our model and data arrangements. First of all is the upload of the different data frames, this includes de sales_train_validation set, which is the historical information of sold units, we have the calendar set who gives information about the daily dates (weekday, month, special date), finally we have the sell_prices set which contains all the information of the offer prices for each sku in each store for each day of the time frame we have. So firts, we upload this data frames.
+
+```{r carga_datos, echo=FALSE}
+sales_train_validation = read.csv("sales_train_validation.csv")
+calendar = read.csv("calendar.csv")
+sell_prices = read.csv("sell_prices.csv")
+sample_submission = read.csv("sample_submission.csv")
+```
+
+```{r save_and_load, echo=FALSE, include=FALSE,eval=FALSE}
+#Save the data in an R workspace file
+save.image("datos_p_integrador.RData")
+#Load our data
+load("datos_p_integrador.RData")
+```
+
+Let's see some information abour our data frames:
+
+```{r walmart_summary, include=FALSE, echo=FALSE}
+walmart_summary_frames = data.frame("Data_Frame" = c("sales_train_validation","calendar","sell_prices"), 
+                                    "Rows" = 
+                                      c(dim(sales_train_validation)[1],dim(calendar)[1],dim(sell_prices)[1]),
+                                    "Columns" =
+                                      c(dim(sales_train_validation)[2],dim(calendar)[2],dim(sell_prices)[2]))
+```
+
+```{r, include=FALSE}
+kable(walmart_summary_frames)
+```
+
+As we can see the sell_prices is ver long due to the time window we have, the sales_train_validation frame has all the time series we must forecast in the rows, and in the columns is located the information of all the days in our time window. Finally, the calendar data frame has the specific information of each date.
+
+Now is more clear how are data is organized, with that solved, let's move to generate variable from our calendar data frame, the code that follows generate variables from the months, week days and special dates, also a variable indicating if a event is tomorrow or the day after tomorrow.
+
+```{r calendar_variables}
+#Create the calendar variables
+#First we create factor variable of months
+calendar$month_2 = factor(calendar$month,
+                          levels = unique(calendar$month),
+                          labels = c("enero","febrero","marzo","abril","mayo","junio","julio",
+                                     "agosto","septiembre","octubre","noviembre","diciembre"))
+#Then we create a factor variable for our events
+calendar$events = factor(calendar$event_name_1, 
+       levels = unique(calendar$event_name_1), 
+       labels = c("none","superbowl","valentinesday","presidentday","lentstart","lentweek2","stpatricksday",
+                  "purim_end","orthodoxeaster","pesach_end","cinco_de_mayo","mothers_day","memorialday",
+                  "nbafinalstart","nbafinalsend","fathers_day","independence_day","radaman_starts",
+                  "eid_alfitr","laborday","columbusday","haloween","eidaladha","veteransday",
+                  "thanksgiving","christmas","chanukahend","newyear","orthodoxchristmas",
+                  "martinluterkingday","easter"))
+
+
+#Generate variables if there is an event tomorrow or the day after tomorro
+calendar$dumm_evento = ifelse(calendar$events == "none",0,1)
+#Date tomorrow
+calendar$evento_manana = lead(calendar$dumm_evento)
+calendar[is.na(calendar$evento_manana),"evento_manana"] = 0
+#Date after tomorrow
+calendar$evento_pasado_manana = lead(calendar$dumm_evento,n=2)
+calendar[is.na(calendar$evento_pasado_manana),"evento_pasado_manana"] = 0
+#Month day variable
+```
+
+We have already created our date variables, with that already done, we proceed to generate a data frame that contains only the data of one store, in this first case is the "CA_1" store, we proceed to generate the code for one store and one department, after that we will scalate the code to generate an Arimax model by each department in each store, this will give us a total of 70 Arimax models. After this, we will generate the the historical proportions of the items in each department in each store and multiply this to the forecast of the department, this will give us the predicition for each item. So let's begin, first we filter the "CA_1" store
+
+```{r filtering_ca_1}
+#First we generate file for each store
+ca1 = sales_train_validation %>% filter(store_id =="CA_1")
+```
+
+Now, with the ``ca1`` data frame we proceed to transpose the date columns, later we proceed to change our variables names to a more  accurate ones, and finally we create an important variable for us, the natural logarithm of our values with an ifelse 
+
+```{r, eval=FALSE}
+#We then produce to melt the data frame
+ca1 = melt(ca1, id = c("item_id","dept_id","state_id","store_id","id","cat_id"))
+#We change our variables name to have a more accurate ones
+ca1 = ca1 %>% rename(d = variable, units = value)
+#We then generate the aggregated for the departments
+ca1_grouped = ca1 %>% group_by(state_id,store_id,dept_id,d) %>% summarise("units" = sum(units))
+ca1_grouped = ca1_grouped %>% ungroup()
+#Finally, an additional column of the natural logarithm
+ca1_grouped$ln_units = ifelse(ca1_grouped$units == 0, 0,log(ca1_grouped$units))
+#one more thing, dont forget your dates information
+ca1_grouped = merge(ca1_grouped,calendar, by = "d")
+ca1_grouped$date = as.Date(ca1_grouped$date)
+ca1_grouped$month_day = as.factor(day(ca1_grouped$date))
+
+```
+
+Now we have our aggregated data frame, so with that done, we proceed to model each one of our departments. So firts we make an attempt with the foods_1 department in the "CA_1" store, here we discover the xts objects in R and the ``auto.arima`` function that automatically performs the series integrations and the autoregressive and moving average components, this will save us the time to analyze each series independently.
+
+```{r foods1_arima, eval=FALSE}
+###########
+#  FOODS1 #
+###########
+#Create the foods 1 data frame, the order the data frame, and finally transform in a xts object
+#Filter the department
+ca1_foods1 = ca1_grouped %>% filter(dept_id =="FOODS_1")
+
+#Order the data frame
+ca1_foods1 = ca1_foods1[order(ca1_foods1$date),]
+ca1_foods1$variation_units = ca1_foods1$ln_units-lag(ca1_foods1$ln_units)
+ca1_foods1 = ca1_foods1 %>% mutate(ma1 = rollmean(ca1_foods1$variation_units, k = 2, fill = NA, align = "right"))
+ca1_foods1$ma2 = rollmean(ca1_foods1$variation_units, k = 3, fill = NA, align = "right")
+
+#Generate the train and test frames for the department
+foods1_train = ca1_foods1 %>% filter(date < "2016-03-28")
+foods1_test = ca1_foods1 %>% filter(date >= "2016-03-27")
+
+#Create the time series objects for the train and test
+foods1_train_xts = xts(foods1_train$ln_units, order.by = foods1_train$date)
+foods1_test_xts = xts(foods1_test$ln_units, order.by = foods1_test$date)
+
+#Create the time series arima model for the train set
+foods1_arima = auto.arima(foods1_train_xts)
+summary(foods1_arima)
+
+foods1_test_prediction = forecast(foods1_arima, h = 28)
+foods1_test_predcxts = xts(foods1_test_prediction$mean, order.by = foods1_test$date)
+
+plot(foods1_test_xts)
+lines(foods1_test_predcxts, col = "blue")
+```
+
+To check other model we perform a linear regression with different variables, just to compare the models, in this attempt we realized the autoregressive and moving average components are necessary to improve the model accurracy.
+
+```{r foods1_linear_reg, eval=FALSE}
+###########
+#  FOODS1 #
+###########
+#Fist we adjust the model with the variation of the units
+foods1_lineal = lm(variation_units ~ weekday + event_name_1 + month_2 + month_day, 
+                   data = foods1_train)
+#See our results
+summary(foods1_lineal)
+plot(foods1_lineal)
+
+#Transform to time series to visualize
+foods1_test_xts = xts(foods1_test$variation_units, order.by = foods1_test$date)
+foods1_test_prediction = predict(foods1_lineal, foods1_test)
+
+foods1_test_predcxts = xts(foods1_test_prediction, order.by = foods1_test$date)
+
+plot(foods1_test_xts)
+lines(foods1_test_predcxts, col = "blue")
+
+#Calculate MAE and MAPE
+
+MAE = mean(abs(foods1_test_xts-foods1_test_pred))
+MAPE = 100*mean(abs(foods1_test_xts[3:29]-foods1_test_predcxts[3-29])/foods1_test_xts[3:29])
+
+#
+calculate_vector = lag(foods1_test$units)*(foods1_test_prediction+1)
+calculate_vector = calculate_vector[complete.cases(calculate_vector)]
+prediction_ts = xts(calculate_vector, order.by = foods1_test$date[2:29])
+foods1_tes_xtsunits = xts(foods1_test$units[2:29], order.by = foods1_test$date[2:29])
+
+plot(foods1_tes_xtsunits)
+lines(prediction_ts, col = "blue" ) 
+```
+
+So with one example done, we proceed to scalate the model to iterate over each department in each store, in the code chunck, first we generate the aggregated data frame for the departments. Then we perform the loop that models each one of the 70 Arimax models, and forecast the neccesary dates of the competition. The next step is the historical proportions of the items, we generate the proportion and we multiply this proportion with the forecast of the department, this give us the forecast for each item.
+
+```{r aggregated_departments, warning=FALSE, eval=FALSE}
+#########################
+#Generate the data Frame#
+#########################
+#First we aggregate our data frame
+depts_aggregated = sales_train_validation %>% select(store_id,dept_id, starts_with("d_")) %>% group_by(store_id,dept_id) %>% summarise_all(funs(sum)) %>% ungroup()
+#Then we melt our data frame.
+depts_aggregated = melt(depts_aggregated, id = c("store_id","dept_id"))
+#We change our variables name to have a more accurate ones
+depts_aggregated = depts_aggregated %>% rename(d = variable, units = value)
+#Now we proceed to merge our data frame with the calendar
+depts_aggregated = merge(depts_aggregated, calendar, by = "d")
+depts_aggregated$date = as.Date(depts_aggregated$date)
+#Organize by store, dept and date
+attach(depts_aggregated)
+depts_aggregated = depts_aggregated[order(store_id,dept_id,date),]
+detach(depts_aggregated)
+#Generate the natural logarithm of the units
+depts_aggregated$ln_units = ifelse(depts_aggregated$units == 0,0,log(depts_aggregated$units))
+#Then we generate the varition of the natural log of the units, this give us the percentage variation
+depts_aggregated = depts_aggregated %>%
+  group_by(store_id, dept_id) %>%
+  mutate(var_units = ln_units - lag(ln_units)) %>% ungroup()
+#Create the month_day variable
+depts_aggregated$month_day = as.factor(day(depts_aggregated$date))
+#create dummy variables for the arima models
+depts_aggregated= dummy_cols(depts_aggregated, select_columns = c("month_day","month_2","weekday","event_name_1"),
+                  remove_first_dummy = TRUE)
+#Create the x variables for the forecast
+calendar$date = as.Date(calendar$date)
+cov2 = calendar %>% filter(date >=  "2016-03-01" &  date < "2016-06-01")
+cov2$month_day = day(cov2$date)
+cov2 = dummy_cols(cov2, select_columns = c("month_day","month_2","weekday","event_name_1"),
+                  remove_first_dummy = TRUE)
+testing_dates=cov2$date
+
+
+
+####################################
+#Separate tain and test data frames#
+####################################
+
+#'We have generated the data frame, we then proceed to
+# separate in test and train data frames from the dates
+
+#Train data frame
+depts_aggregated_train = depts_aggregated %>% filter(date < "2016-03-01")
+depts_aggregated_test = depts_aggregated %>% filter(date >= "2016-03-01")
+
+#separate my components with 
+arima_components = list()
+#Exclude the non dummy vars
+to_exclude = names(depts_aggregated) %in% c("d","store_id","dept_id","units","date","wm_yr_wk",
+                                            "weekday","wday","month","year","event_name_1","event_type_1",
+                                            "event_name_2","event_type_2","snap_CA","snap_TX","snap_WI",
+                                            "month_2","events","dumm_evento","ln_units","var_units","month_day")
+
+a = subset(depts_aggregated_train, store_id == "CA_1" & dept_id == "HOUSEHOLD_2")
+b =  xts(a$ln_units, order.by = a$date)
+cov = as.matrix(a[!to_exclude])
+model1 = auto.arima(b, xreg = cov)
+
+#On the train set
+d = subset(depts_aggregated_test, store_id == "CA_1" & dept_id == "HOUSEHOLD_2")
+e = xts(d$ln_units, order.by = d$date)
+cov2 = cov2 %>% select(colnames(cov))
+forecast1 = forecast(model1, h = 92, xreg = as.matrix(cov2))
+forecast1_xts = xts(forecast1$mean, order.by = testing_dates)
+
+#Metrics
+mae(exp(e), exp(forecast1_xts))
+mape(exp(e), exp(forecast1_xts))
+mase(as.numeric(exp(e)),as.numeric(exp(forecast1_xts)), step_size = 1)
+#Grphs
+plot(exp(e))
+lines(exp(forecast1_xts), col = "blue")
+
+#Now let´s start to save our results, first we create 4 lists
+#three for the metrics and one for the forecast
+
+MAE = list()
+MAPE = list()
+MASE = list()
+projection = list()
+
+for (i in unique(depts_aggregated_train$store_id)){
+  for (j in unique(depts_aggregated_train$dept_id)) {
+    #Subset the department an the store
+    a = subset(depts_aggregated_train, store_id == i & dept_id == j)
+    #Generate a time series object
+    b =  xts(a$ln_units, order.by = a$date)
+    #Generate a matrix with different dummy variables of the calendar
+    cov = as.matrix(a[!to_exclude])
+    #Create the model arima with regressors
+    model1 = auto.arima(b, xreg = cov)
+    #the other steps
+
+    #forecast 92 days ahead the model
+    forecast1 = forecast(model1, h = 92, xreg = as.matrix(cov2))
+    #Generate a time series object of the forecast
+    forecast1_xts = xts(forecast1$mean, order.by = testing_dates)
+    
+    ##Store the Forecast##
+    projection[[paste(i,j)]] = forecast1_xts
+    
+  }
+}
+#We have our predictions for our model. Now we must calculate our historical proportions for each product
+####################################
+#       Historical Proportions     #
+####################################
+
+#First is the item proportions
+item_proportion = sales_train_validation %>% select(store_id,dept_id,item_id, starts_with("d_")) %>% 
+  mutate(total = rowSums(select(.,contains("d_")))) %>% select(store_id,dept_id,item_id,total)
+
+item_proportion = item_proportion %>% group_by(store_id,dept_id) %>% mutate(proportion = total/sum(total))
+
+#Lets map our for loop
+step_1 = sales_train_validation %>% select(store_id,dept_id,item_id, starts_with("d_")) %>% filter(store_id == "CA_1" & dept_id == "FOODS_1" & item_id == "FOODS_1_001")
+step_2 = melt(step_1, id = c("store_id","dept_id","item_id")) %>% rename("d" = variable, "units" = value)
+step_3 = merge(step_2,calendar, by = "d") %>% select(store_id, dept_id, item_id, units, date)
+step_3$date = as.Date(step_3$date)
+step_4 = step_3 %>% filter(date >= "2016-03-01" & date <= "2016-03-28")
+step_5 = xts(step_4$units, order.by = step_4$date)
+
+percentaje = item_proportion %>% filter(store_id == "CA_1" & dept_id == "FOODS_1" & item_id == "FOODS_1_001")
+percentaje =  percentaje$proportion[1]
+item_prediction = exp(projection[[paste("CA_1","FOODS_1")]])*percentaje
+
+MAE_ITEMS = list()
+MAE_ITEMS[[paste("CA_1","FOODS_1","FOODS_1_001")]] = mae(step_5,item_prediction)
+mase(as.numeric(item_prediction),as.numeric(step_5))
+##THE LOOP#
+
+#First create our lists
+ITEMS_PREDICTIONS = list()
+MAE_ITEMS = list()
+MAPE_ITEMS = list()
+MASE_ITEMS = list()
+
+#Now we generate our loop
+for (i in unique(sales_train_validation$store_id)) {
+  for (j in unique(sales_train_validation$dept_id)) {
+    for (k in unique(sales_train_validation$item_id)) {
+
+      #Get the percentaje of the selected item
+      percentaje = item_proportion %>% 
+        filter(store_id == i & dept_id == j & item_id == k)
+      #Turn to scalar
+      percentaje =  percentaje$proportion[1]
+      if (is.na(percentaje))
+      next
+      #Predict the item
+      item_prediction = exp(projection[[paste(i,j)]])*percentaje
+      #Store the predictions and different metrics
+      ITEMS_PREDICTIONS[[paste(i,j,k)]] = item_prediction
+      
+    }
+    
+  }
+  
+}
+
+```
+
+We have developed all the process to an Arimax for a hierarchical time series and approached to mulitply the forecast by each one of the weights of each product. Now, in the next code we proceed to generate the ouptut as csv to analyze the results for the hierarchical model and for the prediction in each product.
+
+```{r output_generation, echo=FALSE, include=FALSE, eval=FALSE}
+######################
+#Hierarchical Results#
+######################
+
+#First the hierarchical Data Frames
+Results_data_frame = data.frame(MAE = unlist(MAE),MAPE = unlist(MAPE), MASE = unlist(MASE))
+
+write.csv2(Results_data_frame, file = "depts_results.csv", dec = ",", sep = ";")
+######################
+#  By Item Results   #
+######################
+
+Results_items_data_frame = data.frame(mae_items = unlist(MAE_ITEMS), 
+                                      mape_items = unlist(MAPE_ITEMS), 
+                                      mase_items = unlist(MASE_ITEMS))
+write.csv2(Results_items_data_frame, file = "items_results.csv", dec = ",", sep = ";")
+
+#Data frame of the projections
+submission = data.frame(ITEM = names(ITEMS_PREDICTIONS[1]), t(as.matrix(ITEMS_PREDICTIONS[[1]])))
+
+for (i in 2:length(ITEMS_PREDICTIONS)) {
+  submission = rbind(submission,
+                     data.frame(ITEM = names(ITEMS_PREDICTIONS[i]), t(as.matrix(ITEMS_PREDICTIONS[[i]]))))
+}
+
+write.csv2(submission,file = "submissionarimax.csv", sep = ";", dec = ",", row.names = FALSE)
+```
+
+
+
